@@ -18,22 +18,68 @@ from docx import Document
 
 
 # ---------------------------------------------------------------------------
-# Voice Dictionary — assign specific Bark presets to known characters
+# Dynamic Voice Pool — auto-assigns unique Bark presets to new characters
 # ---------------------------------------------------------------------------
-# Add or modify entries here to match your screenplay's cast.
+# When the parser encounters a character for the first time, it grabs the
+# next unused voice from this pool.  Once assigned, that character keeps
+# the same voice for the entire script (stored in dynamic_character_memory).
 
-VOICE_DICT: dict[str, str] = {
-    "SANJAY":    "v2/en_speaker_2",
-    "ATHARV":    "v2/en_speaker_5",
-    "DEVAJ":     "v2/en_speaker_8",
-    "AARADHYA":  "v2/en_speaker_0",
-    "AADHYAN":   "v2/en_speaker_3",
-    "NARRATOR":  "v2/en_speaker_9",
-}
+AVAILABLE_VOICES: list[str] = [
+    "v2/en_speaker_0", "v2/en_speaker_1", "v2/en_speaker_2",
+    "v2/en_speaker_3", "v2/en_speaker_4", "v2/en_speaker_5",
+    "v2/en_speaker_6", "v2/en_speaker_8",
+]
 
-# Fallback voice for any character not listed above
+# Fixed narrator voice (never enters the pool)
+NARRATOR_VOICE = "v2/en_speaker_9"
+
+# Fallback when the pool is exhausted
 DEFAULT_VOICE = "v2/en_speaker_7"
-NARRATOR_VOICE = VOICE_DICT.get("NARRATOR", "v2/en_speaker_9")
+
+# This dictionary starts empty and fills up as the script is read
+dynamic_character_memory: dict[str, str] = {}
+
+
+def get_voice_for_character(char_name: str) -> str:
+    """Dynamically assign a unique Bark voice to each character.
+
+    - NARRATOR always gets the fixed narrator voice.
+    - Known characters return their previously assigned voice.
+    - New characters pop the next available voice from the pool.
+    - If the pool runs out, falls back to DEFAULT_VOICE.
+    """
+    # Narrator is always fixed
+    if char_name.upper() == "NARRATOR":
+        return NARRATOR_VOICE
+
+    # Return cached voice if we've seen this character before
+    char_key = char_name.upper().strip()
+    if char_key in dynamic_character_memory:
+        return dynamic_character_memory[char_key]
+
+    # Assign the next available voice from the pool
+    if AVAILABLE_VOICES:
+        new_voice = AVAILABLE_VOICES.pop(0)
+    else:
+        new_voice = DEFAULT_VOICE
+
+    dynamic_character_memory[char_key] = new_voice
+    print(f"  [VOICE] Assigned {new_voice} → {char_name}")
+    return new_voice
+
+
+def reset_voice_pool() -> None:
+    """Reset the voice pool for a fresh script parse.
+
+    Call this before parsing a new script to ensure clean allocation.
+    """
+    global AVAILABLE_VOICES, dynamic_character_memory
+    AVAILABLE_VOICES = [
+        "v2/en_speaker_0", "v2/en_speaker_1", "v2/en_speaker_2",
+        "v2/en_speaker_3", "v2/en_speaker_4", "v2/en_speaker_5",
+        "v2/en_speaker_6", "v2/en_speaker_8",
+    ]
+    dynamic_character_memory = {}
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +214,9 @@ def parse_script(text: str) -> dict:
           ]
         }
     """
+    # Reset the voice pool so each script gets a fresh allocation
+    reset_voice_pool()
+
     lines = text.strip().split("\n")
     parts: list[dict] = []
     current_part_name = "Introduction"
@@ -210,8 +259,8 @@ def parse_script(text: str) -> dict:
             # Handle split characters like SANJAY/AADHYAN → take first name
             char_name = raw_name.split("/")[0].strip()
 
-            # Look up voice from the voice dictionary
-            voice = VOICE_DICT.get(char_name.upper(), DEFAULT_VOICE)
+            # Dynamically assign a unique voice from the pool
+            voice = get_voice_for_character(char_name)
 
             # Clean emotion tags string
             emotion_str = raw_tags.strip() if raw_tags else None
