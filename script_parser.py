@@ -1,9 +1,16 @@
 """
-SvaanVox Script Parser — Intelligent audiobook script analysis.
+SvaanVox Script Parser v2 — Cinematic Screenplay Format
+========================================================
 
-Parses DOCX files, divides text into Parts/Chapters, classifies lines
-(title, dialogue, narration, SFX), detects character gender & emotion,
-and auto-assigns Bark voice presets.
+Parses DOCX files written in the cinematic format:
+
+    CHARACTER NAME  (emotion, stage direction) : "Spoken Dialogue"
+    [SFX — description]
+    Plain narration text
+
+Extracts structured segments for the Bark AI engine, completely
+stripping stage directions and character metadata so the TTS model
+only ever receives clean, speakable text.
 """
 
 import re
@@ -11,72 +18,120 @@ from docx import Document
 
 
 # ---------------------------------------------------------------------------
-# Gender detection — common name lists (expandable)
+# Voice Dictionary — assign specific Bark presets to known characters
 # ---------------------------------------------------------------------------
-FEMALE_NAMES = {
-    "alice", "anna", "bella", "cara", "clara", "diana", "elena", "emma",
-    "eva", "fiona", "grace", "hannah", "isla", "jane", "julia", "kate",
-    "laura", "lily", "luna", "maria", "mary", "maya", "mia", "nora",
-    "olivia", "rose", "sara", "sarah", "sophia", "victoria", "queen",
-    "princess", "mother", "mom", "grandmother", "grandma", "sister",
-    "aunt", "wife", "girl", "woman", "lady", "maiden", "duchess",
-    "empress", "goddess", "priestess", "heroine", "witch", "she",
+# Add or modify entries here to match your screenplay's cast.
+
+VOICE_DICT: dict[str, str] = {
+    "SANJAY":    "v2/en_speaker_2",
+    "ATHARV":    "v2/en_speaker_5",
+    "DEVAJ":     "v2/en_speaker_8",
+    "AARADHYA":  "v2/en_speaker_0",
+    "AADHYAN":   "v2/en_speaker_3",
+    "NARRATOR":  "v2/en_speaker_9",
 }
 
-MALE_NAMES = {
-    "adam", "alex", "arthur", "ben", "blake", "charles", "daniel", "david",
-    "derek", "edward", "felix", "george", "henry", "jack", "james", "john",
-    "leo", "mark", "max", "michael", "oliver", "peter", "robert", "sam",
-    "thomas", "william", "king", "prince", "father", "dad", "grandfather",
-    "grandpa", "brother", "uncle", "husband", "boy", "man", "lord", "duke",
-    "emperor", "god", "priest", "hero", "knight", "wizard", "he",
+# Fallback voice for any character not listed above
+DEFAULT_VOICE = "v2/en_speaker_7"
+NARRATOR_VOICE = VOICE_DICT.get("NARRATOR", "v2/en_speaker_9")
+
+
+# ---------------------------------------------------------------------------
+# Emotion → Bark Audio Cue Translation
+# ---------------------------------------------------------------------------
+# If the (emotion/stage-direction) block contains any of these keywords,
+# the corresponding Bark text cue is *prepended* to the spoken dialogue.
+# This guides Bark to generate the audio with the right emotional colour.
+
+EMOTION_CUE_MAP: dict[str, str] = {
+    # ---- Laughter & amusement ----
+    "laugh":     "[laughs]",
+    "chuckle":   "[laughs]",
+    "amused":    "[laughs]",
+    "giggle":    "[laughs]",
+    # ---- Sighing ----
+    "sigh":      "[sighs]",
+    "exhale":    "[sighs]",
+    "resigned":  "[sighs]",
+    # ---- Crying & sadness ----
+    "cry":       "[crying]",
+    "sob":       "[crying]",
+    "tear":      "[crying]",
+    "weep":      "[crying]",
+    # ---- Anger & shouting ----
+    "angry":     "...",       # Bark uses "..." for tense pauses
+    "shout":     "...",
+    "yell":      "...",
+    "furious":   "...",
+    # ---- Whispering ----
+    "whisper":   "[whispers]",
+    "quiet":     "[whispers]",
+    "hushed":    "[whispers]",
+    # ---- Gasping / surprise ----
+    "gasp":      "[gasps]",
+    "shock":     "[gasps]",
+    "surprise":  "[gasps]",
+    # ---- Hesitation ----
+    "hesitant":  "...",
+    "nervous":   "...",
+    "stammer":   "...",
+    "stutter":   "...",
+    # ---- Excitement / eagerness ----
+    "eager":     "♪",         # Bark uses ♪ for an uplifting cadence
+    "excited":   "♪",
 }
 
-# ---------------------------------------------------------------------------
-# Emotion keywords
-# ---------------------------------------------------------------------------
-EMOTION_MAP = {
-    "angry":    ["angry", "furious", "rage", "yelled", "screamed", "shouted", "roared", "slammed", "fury"],
-    "sad":      ["sad", "cried", "wept", "tears", "sobbed", "mourned", "grief", "sorrow", "whispered sadly"],
-    "happy":    ["happy", "laughed", "smiled", "joyful", "cheerful", "grinned", "excited", "delighted"],
-    "scared":   ["scared", "trembled", "afraid", "terrified", "fear", "horror", "gasped", "shivered"],
-    "excited":  ["excited", "thrilled", "eagerly", "enthusiastic", "can't wait", "amazing"],
-    "calm":     ["calm", "quietly", "softly", "gently", "peacefully", "serene", "whispered"],
-}
 
 # ---------------------------------------------------------------------------
-# Voice assignment matrix
+# Regex patterns for the cinematic screenplay format
 # ---------------------------------------------------------------------------
-VOICE_MATRIX = {
-    # (gender, emotion) -> bark preset
-    ("female", "calm"):     "v2/en_speaker_0",   # Aria
-    ("female", "happy"):    "v2/en_speaker_2",   # Clara
-    ("female", "excited"):  "v2/en_speaker_4",   # Elena
-    ("female", "sad"):      "v2/en_speaker_8",   # Isla
-    ("female", "angry"):    "v2/en_speaker_4",   # Elena (bright/intense)
-    ("female", "scared"):   "v2/en_speaker_8",   # Isla (soft/shaky)
-    ("female", "neutral"):  "v2/en_speaker_6",   # Grace
-    ("male", "calm"):       "v2/en_speaker_7",   # Henry (narrator)
-    ("male", "happy"):      "v2/en_speaker_5",   # Felix
-    ("male", "excited"):    "v2/en_speaker_9",   # Jack
-    ("male", "sad"):        "v2/en_speaker_1",   # Blake (deep)
-    ("male", "angry"):      "v2/en_speaker_3",   # Derek (strong)
-    ("male", "scared"):     "v2/en_speaker_5",   # Felix
-    ("male", "neutral"):    "v2/en_speaker_7",   # Henry
-    ("neutral", "neutral"): "v2/en_speaker_7",   # Henry (narrator default)
-}
 
-# Character → voice cache (consistent voice per character across script)
-_character_voice_cache: dict[str, str] = {}
-_character_counter = 0
+# Main dialogue pattern:
+#   CHARACTER NAME  (emotion, stage direction) : "Spoken Dialogue"
+# Also handles:
+#   CHARACTER NAME : "Dialogue"          (no emotion block)
+#   CHARACTER NAME  (tags) : Dialogue    (no quotes)
+RE_DIALOGUE = re.compile(
+    r"""
+    ^                                     # start of line
+    ([A-Z][A-Z\s/]+?)                     # 1: CHARACTER NAME (all-caps, may include / for split chars)
+    \s*                                   # optional whitespace
+    (?:\(([^)]*)\))?                       # 2: optional (emotion, stage direction) in parens
+    \s*                                   # optional whitespace
+    :\s*                                  # colon separator
+    ["\u201c]?                             # optional opening quote
+    (.+?)                                 # 3: the spoken dialogue text
+    ["\u201d]?\s*$                         # optional closing quote + end of line
+    """,
+    re.VERBOSE,
+)
+
+# SFX pattern: [SFX — description] or [SFX: description] or just [description]
+RE_SFX = re.compile(
+    r"""
+    ^\[                                   # opening bracket
+    (?:SFX\s*[:\u2014\-—]\s*)?            # optional "SFX —" or "SFX:" prefix
+    (.+?)                                 # 1: the SFX description
+    \]\s*$                                # closing bracket
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Part / Chapter / Scene headers
+RE_PART_HEADER = re.compile(
+    r'^(?:PART|CHAPTER|SCENE|ACT|BOOK)\s+\w+', re.IGNORECASE
+)
+
+# Horizontal separators (---, ***, ###)
+RE_SEPARATOR = re.compile(r'^[-*#]{3,}$')
 
 
 # ---------------------------------------------------------------------------
-# DOCX parsing
+# DOCX text extraction
 # ---------------------------------------------------------------------------
 
 def parse_docx(file_path: str) -> str:
-    """Extract all text from a .docx file."""
+    """Extract all text from a .docx file, preserving line structure."""
     doc = Document(file_path)
     lines = []
     for para in doc.paragraphs:
@@ -87,34 +142,32 @@ def parse_docx(file_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Script parsing — main intelligence
+# Core parser
 # ---------------------------------------------------------------------------
 
-# Patterns
-RE_PART_HEADER = re.compile(
-    r'^(?:PART|CHAPTER|SCENE|ACT|BOOK)\s+\w+', re.IGNORECASE
-)
-RE_SEPARATOR = re.compile(r'^-{3,}$|^\*{3,}$|^#{3,}$')
-RE_TITLE = re.compile(r'^TITLE\s*:\s*(.+)$', re.IGNORECASE)
-RE_SFX = re.compile(r'^\[(.+?)\]$')
-RE_DIALOGUE = re.compile(
-    r'^([A-Z][A-Za-z\s]{1,30}?)\s*:\s*["\u201c]?(.+?)["\u201d]?\s*$'
-)
-RE_DIALOGUE_SAID = re.compile(
-    r'^["\u201c](.+?)["\u201d]\s*(?:said|whispered|shouted|yelled|cried|exclaimed|replied|asked|muttered|screamed)\s+([A-Z][A-Za-z\s]+?)\.?\s*$',
-    re.IGNORECASE,
-)
-
-
 def parse_script(text: str) -> dict:
-    """Parse a script into structured parts with classified segments.
+    """Parse a cinematic screenplay into structured parts with segments.
 
-    Returns: { "parts": [ { "name": str, "segments": [...] } ] }
+    Returns:
+        {
+          "parts": [
+            {
+              "name": "Chapter 1",
+              "segments": [
+                {
+                  "type":      "dialogue" | "sfx" | "narrator",
+                  "character": "ATHARV" | None,
+                  "text":      "Clean spoken text for Bark",
+                  "emotion":   "hesitant, eager" | None,
+                  "voice":     "v2/en_speaker_5",
+                  "bark_text": "... Dr. Sanjay?"
+                },
+                ...
+              ]
+            }
+          ]
+        }
     """
-    global _character_voice_cache, _character_counter
-    _character_voice_cache = {}
-    _character_counter = 0
-
     lines = text.strip().split("\n")
     parts: list[dict] = []
     current_part_name = "Introduction"
@@ -125,95 +178,65 @@ def parse_script(text: str) -> dict:
         if not line:
             continue
 
-        # --- Part / Chapter separator ---
+        # ── Part / Chapter / Scene boundary ──────────────────────
         if RE_PART_HEADER.match(line) or RE_SEPARATOR.match(line):
-            # Save the current part
             if current_segments:
                 parts.append({"name": current_part_name, "segments": current_segments})
                 current_segments = []
-            if RE_PART_HEADER.match(line):
-                current_part_name = line
-            else:
-                current_part_name = f"Part {len(parts) + 2}"
+            current_part_name = line if RE_PART_HEADER.match(line) else f"Part {len(parts) + 2}"
             continue
 
-        # --- Title ---
-        title_match = RE_TITLE.match(line)
-        if title_match:
-            current_segments.append({
-                "type": "title",
-                "character": None,
-                "text": title_match.group(1).strip(),
-                "emotion": None,
-                "voice": "v2/en_speaker_7",
-            })
-            continue
-
-        # --- SFX ---
+        # ── SFX block: [SFX — thunder] or [door slam] ───────────
         sfx_match = RE_SFX.match(line)
         if sfx_match:
+            sfx_desc = sfx_match.group(1).strip().lower()
             current_segments.append({
-                "type": "sfx",
+                "type":      "sfx",
                 "character": None,
-                "text": sfx_match.group(1).strip().lower(),
-                "emotion": None,
-                "voice": None,
+                "text":      sfx_desc,
+                "emotion":   None,
+                "voice":     None,
+                "bark_text": None,
             })
             continue
 
-        # --- Dialogue (NAME: "text") ---
+        # ── Character dialogue ───────────────────────────────────
         dial_match = RE_DIALOGUE.match(line)
         if dial_match:
-            char_name = dial_match.group(1).strip()
-            dial_text = dial_match.group(2).strip()
-            emotion = detect_emotion(dial_text)
-            gender = detect_gender(char_name)
-            voice = assign_voice(char_name, gender, emotion)
+            raw_name   = dial_match.group(1).strip()
+            raw_tags   = dial_match.group(2) or ""      # emotion/stage block
+            raw_text   = dial_match.group(3).strip()
+
+            # Handle split characters like SANJAY/AADHYAN → take first name
+            char_name = raw_name.split("/")[0].strip()
+
+            # Look up voice from the voice dictionary
+            voice = VOICE_DICT.get(char_name.upper(), DEFAULT_VOICE)
+
+            # Clean emotion tags string
+            emotion_str = raw_tags.strip() if raw_tags else None
+
+            # Translate emotions to Bark audio cues
+            bark_text = _inject_emotion_cues(raw_text, raw_tags)
+
             current_segments.append({
-                "type": "dialogue",
+                "type":      "dialogue",
                 "character": char_name,
-                "text": dial_text,
-                "emotion": emotion,
-                "voice": voice,
+                "text":      raw_text,       # original clean dialogue
+                "emotion":   emotion_str,
+                "voice":     voice,
+                "bark_text": bark_text,       # emotion-injected text for Bark
             })
             continue
 
-        # --- Dialogue ("text" said Character) ---
-        said_match = RE_DIALOGUE_SAID.match(line)
-        if said_match:
-            dial_text = said_match.group(1).strip()
-            char_name = said_match.group(2).strip()
-            emotion = detect_emotion(dial_text)
-            gender = detect_gender(char_name)
-            voice = assign_voice(char_name, gender, emotion)
-            current_segments.append({
-                "type": "dialogue",
-                "character": char_name,
-                "text": dial_text,
-                "emotion": emotion,
-                "voice": voice,
-            })
-            continue
-
-        # --- All-caps line at the top → treat as title ---
-        if line.isupper() and len(line) > 3 and len(current_segments) == 0:
-            current_segments.append({
-                "type": "title",
-                "character": None,
-                "text": line.title(),
-                "emotion": None,
-                "voice": "v2/en_speaker_7",
-            })
-            continue
-
-        # --- Narration (default) ---
-        emotion = detect_emotion(line)
+        # ── Narration (everything else) ──────────────────────────
         current_segments.append({
-            "type": "narrator",
+            "type":      "narrator",
             "character": None,
-            "text": line,
-            "emotion": emotion,
-            "voice": "v2/en_speaker_7",
+            "text":      line,
+            "emotion":   None,
+            "voice":     NARRATOR_VOICE,
+            "bark_text": line,               # narration goes to Bark as-is
         })
 
     # Don't forget the last part
@@ -224,56 +247,78 @@ def parse_script(text: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Gender & emotion detection
+# Emotion → Bark cue injection (internal helper)
 # ---------------------------------------------------------------------------
 
-def detect_gender(character_name: str) -> str:
-    """Heuristic gender detection from character name."""
-    name_lower = character_name.lower().split()[0] if character_name else ""
-    if name_lower in FEMALE_NAMES:
-        return "female"
-    if name_lower in MALE_NAMES:
-        return "male"
-    # Check if name ends with common female suffixes
-    if name_lower.endswith(("a", "ie", "ina", "elle", "ette")):
-        return "female"
-    return "neutral"
+def _inject_emotion_cues(dialogue: str, emotion_block: str) -> str:
+    """Scan the emotion/stage-direction block for keywords and prepend
+    the corresponding Bark audio cues to the dialogue string.
 
+    Example:
+        dialogue     = "Dr. Sanjay?"
+        emotion_block = "hesitant, respectful — eager"
+        → returns:  "... Dr. Sanjay?"
 
-def detect_emotion(text: str) -> str:
-    """Keyword-based emotion detection from text."""
-    text_lower = text.lower()
-    best_emotion = "neutral"
-    best_count = 0
-    for emotion, keywords in EMOTION_MAP.items():
-        count = sum(1 for kw in keywords if kw in text_lower)
-        if count > best_count:
-            best_count = count
-            best_emotion = emotion
-    return best_emotion
-
-
-def assign_voice(character_name: str, gender: str, emotion: str) -> str:
-    """Assign a consistent Bark voice preset to a character.
-
-    Same character always gets the same base voice (for consistency),
-    but emotion can modulate it.
+    Multiple matching cues are prepended in order, deduplicated.
     """
-    global _character_counter
+    if not emotion_block:
+        return dialogue
 
-    # Check cache for a previously assigned base voice
-    char_key = character_name.lower().strip()
-    if char_key in _character_voice_cache:
-        return _character_voice_cache[char_key]
+    # Normalise the block: lowercase, replace separators with spaces
+    block_lower = emotion_block.lower().replace("—", " ").replace("-", " ").replace(",", " ")
 
-    # Look up in the matrix
-    voice = VOICE_MATRIX.get(
-        (gender, emotion),
-        VOICE_MATRIX.get((gender, "neutral"), "v2/en_speaker_7"),
-    )
+    # Collect unique cues to prepend
+    cues_to_prepend: list[str] = []
+    seen_cues: set[str] = set()
 
-    # Cache it
-    _character_voice_cache[char_key] = voice
-    _character_counter += 1
+    for keyword, cue in EMOTION_CUE_MAP.items():
+        if keyword in block_lower and cue not in seen_cues:
+            cues_to_prepend.append(cue)
+            seen_cues.add(cue)
 
-    return voice
+    if not cues_to_prepend:
+        return dialogue
+
+    # Build the final string: cues + space + dialogue
+    cue_prefix = " ".join(cues_to_prepend)
+    return f"{cue_prefix} {dialogue}"
+
+
+# ---------------------------------------------------------------------------
+# Quick self-test (run with: python script_parser.py)
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    test_script = """
+CHAPTER 1 — The Signal
+
+[SFX — thunder rumbling in the distance]
+
+The lab was dark. Only the blue glow of the monitors kept the room alive.
+
+ATHARV  (hesitant, respectful — eager) : "Dr. Sanjay?"
+
+SANJAY  (calm, measured) : "Come in, Atharv. I've been expecting you."
+
+[SFX — door creaking open]
+
+SANJAY/AADHYAN  (laughing, amused) : "You should see your face right now."
+
+DEVAJ  (whispering, nervous) : "Something doesn't feel right."
+
+AARADHYA  (sigh, resigned) : "We've been through this before."
+    """
+
+    result = parse_script(test_script)
+    print("=" * 60)
+    for part in result["parts"]:
+        print(f"\n📖 {part['name']}")
+        for seg in part["segments"]:
+            if seg["type"] == "sfx":
+                print(f"   🔊 [SFX] {seg['text']}")
+            elif seg["type"] == "dialogue":
+                print(f"   🎤 {seg['character']} ({seg['emotion']}) → voice: {seg['voice']}")
+                print(f"      Original:  \"{seg['text']}\"")
+                print(f"      Bark gets: \"{seg['bark_text']}\"")
+            else:
+                print(f"   📜 [NARRATOR] {seg['text']}")
