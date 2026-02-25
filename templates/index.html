@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>SvaanVox — AI Text-to-Audio Engine</title>
+    <meta name="description"
+        content="SvaanVox: Advanced multi-character audiobook and TTS generation powered by Bark AI." />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class', theme: { extend: { colors: { saffron: '#FF9933', crimson: '#DC143C', golden: '#FFD700', tri: '#138808', surface: '#181818', deep: '#121212', card: '#1E1E1E', border: '#2A2A2A' }, fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } } };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet" />
+    <style>
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: #121212;
+            color: #f5f5f5
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: #333;
+            outline: none
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #FF9933;
+            cursor: pointer;
+            box-shadow: 0 0 6px rgba(255, 153, 51, .5)
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(12px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        .fade-up {
+            animation: fadeUp .35s ease-out both
+        }
+
+        @keyframes pulse-glow {
+
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(255, 153, 51, .3)
+            }
+
+            50% {
+                box-shadow: 0 0 20px rgba(255, 153, 51, .6)
+            }
+        }
+
+        .pulse-glow {
+            animation: pulse-glow 2s ease-in-out infinite
+        }
+
+        @keyframes wave1 {
+
+            0%,
+            100% {
+                height: 8px
+            }
+
+            50% {
+                height: 22px
+            }
+        }
+
+        @keyframes wave2 {
+
+            0%,
+            100% {
+                height: 14px
+            }
+
+            50% {
+                height: 28px
+            }
+        }
+
+        @keyframes wave3 {
+
+            0%,
+            100% {
+                height: 6px
+            }
+
+            50% {
+                height: 18px
+            }
+        }
+
+        .wave-bar {
+            width: 3px;
+            border-radius: 2px;
+            display: inline-block;
+            margin: 0 1.5px
+        }
+
+        .wb1 {
+            animation: wave1 .8s ease-in-out infinite;
+            background: #FF9933
+        }
+
+        .wb2 {
+            animation: wave2 .8s ease-in-out infinite .15s;
+            background: #FFD700
+        }
+
+        .wb3 {
+            animation: wave3 .8s ease-in-out infinite .3s;
+            background: #138808
+        }
+
+        textarea:focus,
+        select:focus {
+            box-shadow: 0 0 0 2px rgba(255, 153, 51, .4)
+        }
+
+        .nav-active {
+            background: linear-gradient(135deg, rgba(255, 153, 51, .15), rgba(19, 136, 8, .1));
+            border-left: 3px solid #FF9933
+        }
+
+        .audio-card {
+            transition: transform .2s, box-shadow .2s
+        }
+
+        .audio-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, .4)
+        }
+
+        .drop-zone {
+            border: 2px dashed #333;
+            transition: border-color .2s, background .2s
+        }
+
+        .drop-zone.drag-over {
+            border-color: #FF9933;
+            background: rgba(255, 153, 51, .05)
+        }
+
+        .seg-chip {
+            transition: all .15s
+        }
+
+        .seg-chip:hover {
+            transform: scale(1.01)
+        }
+
+        .part-card {
+            transition: all .2s
+        }
+    </style>
+</head>
+
+<body class="flex flex-col h-screen overflow-hidden">
+    <div class="flex flex-1 overflow-hidden">
+
+        <!-- LEFT SIDEBAR -->
+        <aside id="sidebar" class="w-[320px] min-w-[320px] bg-surface border-r border-border flex flex-col h-full">
+            <div class="flex items-center gap-3 px-5 py-5 border-b border-border">
+                <img src="/static/logo.png" alt="SvaanVox" class="w-11 h-11 rounded-lg object-cover" />
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight"><span class="text-saffron">Svaan</span><span
+                            class="text-white">Vox</span></h1>
+                    <p class="text-[10px] text-gray-500 tracking-widest uppercase">Bark AI Engine v2</p>
+                </div>
+            </div>
+            <nav class="px-3 pt-4 pb-2 space-y-1">
+                <button onclick="switchTab('home')" id="tab-home"
+                    class="nav-btn nav-active w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-200 hover:bg-white/5 transition-all">
+                    <svg class="w-5 h-5 text-saffron" fill="none" stroke="currentColor" stroke-width="2"
+                        viewBox="0 0 24 24">
+                        <path
+                            d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z" />
+                    </svg>Home</button>
+                <button onclick="switchTab('create')" id="tab-create"
+                    class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-white/5 transition-all">
+                    <svg class="w-5 h-5 text-tri" fill="none" stroke="currentColor" stroke-width="2"
+                        viewBox="0 0 24 24">
+                        <path d="M12 4v16m8-8H4" />
+                    </svg>Create Audio</button>
+                <button onclick="switchTab('library')" id="tab-library"
+                    class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-white/5 transition-all">
+                    <svg class="w-5 h-5 text-golden" fill="none" stroke="currentColor" stroke-width="2"
+                        viewBox="0 0 24 24">
+                        <path
+                            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>Library</button>
+            </nav>
+
+            <div class="flex-1 overflow-y-auto px-4 pb-4">
+                <div id="panel-create" class="space-y-4 mt-2">
+                    <!-- Mode selector -->
+                    <div>
+                        <label
+                            class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Mode</label>
+                        <select id="input-mode" onchange="onModeChange()"
+                            class="w-full bg-deep border border-border rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none appearance-none cursor-pointer"
+                            style="background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23888%22 stroke-width=%222%22><path d=%22M6 9l6 6 6-6%22/></svg>');background-repeat:no-repeat;background-position:right 12px center;">
+                            <option value="audiobook">🎧 Audiobook Script</option>
+                            <option value="standard">🎙️ Standard TTS</option>
+                        </select>
+                    </div>
+
+                    <!-- STANDARD TTS PANEL -->
+                    <div id="tts-panel" class="hidden space-y-4">
+                        <div>
+                            <label
+                                class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Text</label>
+                            <textarea id="input-text" rows="8" placeholder="Enter text here…"
+                                class="w-full bg-deep border border-border rounded-xl p-3 text-sm text-gray-200 placeholder-gray-600 resize-none focus:outline-none"></textarea>
+                            <p class="text-[11px] text-gray-600 mt-1" id="char-count">0 characters</p>
+                        </div>
+                        <div>
+                            <label
+                                class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Voice</label>
+                            <select id="input-voice"
+                                class="w-full bg-deep border border-border rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none appearance-none cursor-pointer"
+                                style="background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23888%22 stroke-width=%222%22><path d=%22M6 9l6 6 6-6%22/></svg>');background-repeat:no-repeat;background-position:right 12px center;">
+                                {% for v in voices %}<option value="{{ v.id }}">{{ v.name }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <button onclick="generateTTS()" id="btn-gen-tts"
+                            class="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-saffron to-amber-500 hover:from-amber-500 hover:to-saffron text-deep font-bold text-sm py-3 rounded-xl transition-all shadow-lg pulse-glow">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5"
+                                viewBox="0 0 24 24">
+                                <path
+                                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span id="gen-tts-text">Generate Audio</span>
+                        </button>
+                    </div>
+
+                    <!-- AUDIOBOOK PANEL -->
+                    <div id="audiobook-panel" class="space-y-4">
+                        <div class="drop-zone rounded-xl p-6 text-center cursor-pointer" id="docx-drop"
+                            onclick="document.getElementById('docx-input').click()">
+                            <input type="file" id="docx-input" accept=".docx" class="hidden"
+                                onchange="uploadDocx(this)" />
+                            <svg class="w-10 h-10 mx-auto text-gray-600 mb-2" fill="none" stroke="currentColor"
+                                stroke-width="1.5" viewBox="0 0 24 24">
+                                <path
+                                    d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                            </svg>
+                            <p class="text-sm font-semibold text-gray-400">📄 Upload .docx Script</p>
+                            <p class="text-[11px] text-gray-600 mt-1">or drag & drop here</p>
+                        </div>
+                        <div id="docx-info" class="hidden text-xs text-tri font-medium px-2">✓ Script loaded</div>
+
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="sfx-toggle" checked
+                                class="w-4 h-4 rounded bg-deep border-border text-saffron focus:ring-saffron" />
+                            <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Enable Sound
+                                Effects</span>
+                        </label>
+
+                        <button onclick="generateAudiobook()" id="btn-gen-audiobook"
+                            class="hidden w-full flex items-center justify-center gap-2 bg-gradient-to-r from-tri to-emerald-500 hover:from-emerald-500 hover:to-tri text-white font-bold text-sm py-3 rounded-xl transition-all shadow-lg">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5"
+                                viewBox="0 0 24 24">
+                                <path
+                                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span id="gen-ab-text">Generate Audiobook</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="px-4 py-3 border-t border-border">
+                <div class="flex items-center gap-2 text-[11px] text-gray-600">
+                    <div class="w-2 h-2 rounded-full bg-tri animate-pulse"></div><span>Engine Ready</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN WORKSPACE -->
+        <main class="flex-1 flex flex-col overflow-hidden bg-deep">
+            <header class="flex items-center gap-4 px-6 py-4 border-b border-border bg-surface/50 backdrop-blur-sm">
+                <div class="flex-1 relative">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none"
+                        stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <circle cx="11" cy="11" r="8" />
+                        <path d="M21 21l-4.35-4.35" />
+                    </svg>
+                    <input id="search-input" type="text" placeholder="Search generations…" oninput="filterLibrary()"
+                        class="w-full bg-deep border border-border rounded-xl pl-10 pr-4 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-saffron/30" />
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="filterByMode('all')"
+                        class="filter-btn active-filter px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white/5 text-gray-300 hover:bg-white/10 border border-transparent"
+                        data-filter="all">All</button>
+                    <button onclick="filterByMode('audiobook')"
+                        class="filter-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white/5 text-gray-500 hover:bg-white/10 border border-transparent"
+                        data-filter="audiobook">🎧 Audiobook</button>
+                    <button onclick="filterByMode('standard')"
+                        class="filter-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white/5 text-gray-500 hover:bg-white/10 border border-transparent"
+                        data-filter="standard">🎙️ Standard</button>
+                </div>
+                <button onclick="loadLibrary()"
+                    class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-saffron transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                </button>
+            </header>
+
+            <section id="workspace" class="flex-1 overflow-y-auto p-6">
+                <!-- HOME -->
+                <div id="view-home" class="flex flex-col items-center justify-center h-full text-center fade-up">
+                    <img src="/static/logo.png" alt="SvaanVox"
+                        class="w-28 h-28 mx-auto mb-6 rounded-2xl shadow-2xl shadow-saffron/10" />
+                    <h2 class="text-3xl font-extrabold mb-2">Welcome to <span class="text-saffron">Svaan</span><span
+                            class="text-white">Vox</span></h2>
+                    <p class="text-gray-500 text-sm max-w-md leading-relaxed">Transform your scripts into stunning
+                        multi-character audiobooks with intelligent voice switching, SFX, and background music — powered
+                        by Bark AI.</p>
+                    <div class="flex gap-4 mt-8">
+                        <button onclick="switchTab('create')"
+                            class="flex items-center gap-2 bg-gradient-to-r from-saffron to-amber-500 text-deep font-bold text-sm px-6 py-3 rounded-xl shadow-lg hover:shadow-saffron/30 transition-all"><svg
+                                class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5"
+                                viewBox="0 0 24 24">
+                                <path d="M12 4v16m8-8H4" />
+                            </svg>Create Now</button>
+                        <button onclick="switchTab('library')"
+                            class="flex items-center gap-2 bg-white/5 border border-border text-gray-300 font-semibold text-sm px-6 py-3 rounded-xl hover:bg-white/10 transition-all">My
+                            Library</button>
+                    </div>
+                    <div class="flex gap-6 mt-12">
+                        <div class="flex flex-col items-center">
+                            <div class="w-12 h-12 rounded-xl bg-saffron/10 flex items-center justify-center mb-2"><svg
+                                    class="w-6 h-6 text-saffron" fill="none" stroke="currentColor" stroke-width="2"
+                                    viewBox="0 0 24 24">
+                                    <path
+                                        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg></div>
+                            <p class="text-xs text-gray-500 font-medium">10 Voices</p>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <div class="w-12 h-12 rounded-xl bg-tri/10 flex items-center justify-center mb-2"><svg
+                                    class="w-6 h-6 text-tri" fill="none" stroke="currentColor" stroke-width="2"
+                                    viewBox="0 0 24 24">
+                                    <path
+                                        d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                                </svg></div>
+                            <p class="text-xs text-gray-500 font-medium">Auto-Voice</p>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <div class="w-12 h-12 rounded-xl bg-golden/10 flex items-center justify-center mb-2"><svg
+                                    class="w-6 h-6 text-golden" fill="none" stroke="currentColor" stroke-width="2"
+                                    viewBox="0 0 24 24">
+                                    <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg></div>
+                            <p class="text-xs text-gray-500 font-medium">SFX + BGM</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CREATE / LOADING -->
+                <div id="view-create" class="hidden flex-col items-center justify-center h-full text-center fade-up">
+                    <div id="create-idle">
+                        <div
+                            class="w-20 h-20 rounded-2xl bg-gradient-to-br from-saffron/20 to-tri/10 flex items-center justify-center mx-auto mb-4">
+                            <svg class="w-10 h-10 text-saffron" fill="none" stroke="currentColor" stroke-width="1.5"
+                                viewBox="0 0 24 24">
+                                <path
+                                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                            </svg></div>
+                        <h3 class="text-xl font-bold text-gray-200">Ready to Create</h3>
+                        <p class="text-sm text-gray-500 max-w-sm mt-2">Choose your mode in the sidebar. Upload a .docx
+                            for audiobooks or type text for standard TTS.</p>
+                    </div>
+                    <div id="create-loading" class="hidden space-y-6">
+                        <div class="flex items-end justify-center gap-1 h-10">
+                            <div class="wave-bar wb1"></div>
+                            <div class="wave-bar wb2"></div>
+                            <div class="wave-bar wb3"></div>
+                            <div class="wave-bar wb1"></div>
+                            <div class="wave-bar wb2"></div>
+                            <div class="wave-bar wb3"></div>
+                        </div>
+                        <h3 class="text-xl font-bold text-saffron">Generating Audio…</h3>
+                        <p class="text-sm text-gray-500" id="loading-status">Processing your script with Bark AI</p>
+                    </div>
+                </div>
+
+                <!-- SCRIPT TIMELINE (after DOCX upload) -->
+                <div id="view-timeline" class="hidden fade-up">
+                    <h3 class="text-lg font-bold text-gray-200 mb-4">📜 Script Timeline</h3>
+                    <div id="timeline-parts" class="space-y-4"></div>
+                </div>
+
+                <!-- LIBRARY -->
+                <div id="view-library" class="hidden">
+                    <div id="library-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    </div>
+                    <div id="library-empty" class="hidden flex flex-col items-center justify-center py-20 text-center">
+                        <div class="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4"><svg
+                                class="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" stroke-width="1.5"
+                                viewBox="0 0 24 24">
+                                <path
+                                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            </svg></div>
+                        <p class="text-gray-500 font-medium">No generations yet</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- BOTTOM PLAYER -->
+    <footer id="player-bar"
+        class="h-[72px] min-h-[72px] bg-surface border-t border-border flex items-center px-5 gap-5">
+        <div class="flex items-center gap-3 min-w-[200px] w-[240px]">
+            <div
+                class="w-10 h-10 rounded-lg bg-gradient-to-br from-saffron/20 to-tri/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-saffron" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24">
+                    <path
+                        d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg></div>
+            <div class="overflow-hidden">
+                <p id="player-title" class="text-sm font-semibold text-gray-200 truncate">No track loaded</p>
+                <p id="player-subtitle" class="text-[11px] text-gray-500 truncate">SvaanVox</p>
+            </div>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1">
+            <div class="flex items-center gap-4">
+                <button onclick="skipBackward()" class="p-1.5 text-gray-400 hover:text-white transition-colors"><svg
+                        class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path
+                            d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
+                    </svg></button>
+                <button onclick="togglePlay()" id="btn-play"
+                    class="w-10 h-10 rounded-full bg-white flex items-center justify-center hover:scale-105 transition-transform shadow-lg">
+                    <svg id="icon-play" class="w-5 h-5 text-deep ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z" />
+                    </svg>
+                    <svg id="icon-pause" class="w-5 h-5 text-deep hidden" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M6 4h4v16H6zm8 0h4v16h-4z" />
+                    </svg>
+                </button>
+                <button onclick="skipForward()" class="p-1.5 text-gray-400 hover:text-white transition-colors"><svg
+                        class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path
+                            d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
+                    </svg></button>
+            </div>
+            <div class="flex items-center gap-2 w-full max-w-xl">
+                <span id="time-current" class="text-[11px] text-gray-500 w-10 text-right font-mono">0:00</span>
+                <input id="scrubber" type="range" min="0" max="100" value="0" step="0.1" class="flex-1"
+                    oninput="scrubAudio()" />
+                <span id="time-total" class="text-[11px] text-gray-500 w-10 font-mono">0:00</span>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 min-w-[140px] justify-end">
+            <button onclick="toggleMute()" class="p-1 text-gray-400 hover:text-white transition-colors">
+                <svg id="icon-vol" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24">
+                    <path d="M15.536 8.464a5 5 0 010 7.072M17.95 6.05a8 8 0 010 11.9M11 5L6 9H2v6h4l5 4V5z" />
+                </svg>
+                <svg id="icon-mute" class="w-5 h-5 hidden" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24">
+                    <path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6" />
+                </svg>
+            </button>
+            <input id="volume" type="range" min="0" max="1" value="0.8" step="0.01" class="w-24"
+                oninput="setVolume()" />
+        </div>
+    </footer>
+    <audio id="audio-el" preload="auto"></audio>
+
+    <script>
+// ═══════════════════════════════════════════════════════════════
+// SvaanVox — Frontend Application Logic
+// ═══════════════════════════════════════════════════════════════
+
+let currentTab = 'home';
+let libraryData = [];
+let activeFilter = 'all';
+let parsedScript = null;   // { parts: [{name, segments:[...]}] }
+let bgmMap = {};            // { partIndex: bgmFilePath }
+const audio = document.getElementById('audio-el');
+const VOICES = [
+    { id: "v2/en_speaker_0", name: "Aria (Female, Calm)" },
+    { id: "v2/en_speaker_1", name: "Blake (Male, Deep)" },
+    { id: "v2/en_speaker_2", name: "Clara (Female, Warm)" },
+    { id: "v2/en_speaker_3", name: "Derek (Male, Strong)" },
+    { id: "v2/en_speaker_4", name: "Elena (Female, Bright)" },
+    { id: "v2/en_speaker_5", name: "Felix (Male, Friendly)" },
+    { id: "v2/en_speaker_6", name: "Grace (Female, Neutral)" },
+    { id: "v2/en_speaker_7", name: "Henry (Male, Narrator)" },
+    { id: "v2/en_speaker_8", name: "Isla (Female, Soft)" },
+    { id: "v2/en_speaker_9", name: "Jack (Male, Energetic)" },
+];
+
+// ── Tab switching ──
+function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.nav-btn').forEach(b => { b.classList.remove('nav-active', 'text-gray-200'); b.classList.add('text-gray-400'); });
+    const a = document.getElementById('tab-' + tab);
+    if (a) { a.classList.add('nav-active', 'text-gray-200'); a.classList.remove('text-gray-400'); }
+
+    ['view-home', 'view-create', 'view-timeline', 'view-library'].forEach(v => {
+        const el = document.getElementById(v);
+        el.classList.add('hidden'); el.classList.remove('flex');
+    });
+
+    if (tab === 'home') { show('view-home', 'flex'); }
+    else if (tab === 'create') { show('view-create', 'flex'); }
+    else if (tab === 'library') { document.getElementById('view-library').classList.remove('hidden'); loadLibrary(); }
+}
+
+function show(id, display = 'block') { const el = document.getElementById(id); el.classList.remove('hidden'); if (display === 'flex') el.classList.add('flex'); }
+
+// ── Mode switch ──
+function onModeChange() {
+    const m = document.getElementById('input-mode').value;
+    document.getElementById('tts-panel').classList.toggle('hidden', m === 'audiobook');
+    document.getElementById('audiobook-panel').classList.toggle('hidden', m !== 'audiobook');
+}
+onModeChange();
+
+// ── Char count ──
+const textInput = document.getElementById('input-text');
+if (textInput) textInput.addEventListener('input', function () { document.getElementById('char-count').textContent = this.value.length + ' characters'; });
+
+// ── Drag & drop ──
+const dropZone = document.getElementById('docx-drop');
+if (dropZone) {
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault(); dropZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) { uploadDocxFile(e.dataTransfer.files[0]); }
+    });
+}
+
+// ── DOCX Upload ──
+function uploadDocx(input) { if (input.files.length) uploadDocxFile(input.files[0]); }
+
+async function uploadDocxFile(file) {
+    if (!file.name.toLowerCase().endsWith('.docx')) { alert('Please upload a .docx file'); return; }
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+        const res = await fetch('/upload-script', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        parsedScript = data;
+        bgmMap = {};
+        document.getElementById('docx-info').classList.remove('hidden');
+        document.getElementById('docx-info').textContent = '✓ ' + file.name + ' — ' + data.parts.length + ' part(s) detected';
+        document.getElementById('btn-gen-audiobook').classList.remove('hidden');
+        renderTimeline();
+        // Show timeline in workspace
+        ['view-home', 'view-create', 'view-library'].forEach(v => { document.getElementById(v).classList.add('hidden'); document.getElementById(v).classList.remove('flex'); });
+        show('view-timeline');
+    } catch (e) { alert('Upload error: ' + e.message); }
+}
+
+// ── Render Timeline ──
+function renderTimeline() {
+    if (!parsedScript) return;
+    const container = document.getElementById('timeline-parts');
+    const typeColors = { title: 'border-l-golden bg-golden/5', dialogue: 'border-l-saffron bg-saffron/5', narrator: 'border-l-gray-500 bg-white/5', sfx: 'border-l-tri bg-tri/5' };
+    const typeIcons = { title: '👑', dialogue: '💬', narrator: '📖', sfx: '🔊' };
+
+    container.innerHTML = parsedScript.parts.map((part, pi) => {
+        const segsHtml = part.segments.map((seg, si) => {
+            const color = typeColors[seg.type] || typeColors.narrator;
+            const icon = typeIcons[seg.type] || '📖';
+            const voiceOpts = seg.type === 'sfx' ? '' : VOICES.map(v =>
+                `<option value="${v.id}" ${v.id === seg.voice ? 'selected' : ''}>${v.name}</option>`
+            ).join('');
+            const voiceSelect = seg.type === 'sfx' ? `<span class="text-[10px] text-gray-600">auto</span>` :
+                `<select onchange="updateSegVoice(${pi},${si},this.value)" class="bg-deep border border-border rounded px-1.5 py-0.5 text-[11px] text-gray-300 focus:outline-none">${voiceOpts}</select>`;
+
+            return `<div class="seg-chip flex items-start gap-2 p-2.5 rounded-lg border-l-2 ${color} mb-1.5" data-pi="${pi}" data-si="${si}">
+                <span class="text-sm mt-0.5">${icon}</span>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="text-[10px] font-bold uppercase tracking-wider ${seg.type === 'dialogue' ? 'text-saffron' : seg.type === 'title' ? 'text-golden' : seg.type === 'sfx' ? 'text-tri' : 'text-gray-500'}">${seg.type}</span>
+                        ${seg.character ? `<span class="text-[10px] text-gray-400">— ${seg.character}</span>` : ''}
+                        ${seg.emotion && seg.emotion !== 'neutral' ? `<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400">${seg.emotion}</span>` : ''}
+                    </div>
+                    <p class="text-xs text-gray-300 mt-1 leading-relaxed">${seg.text.length > 120 ? seg.text.slice(0, 120) + '…' : seg.text}</p>
+                </div>
+                <div class="flex-shrink-0">${voiceSelect}</div>
+            </div>`;
+        }).join('');
+
+        const hasBgm = bgmMap[pi] ? true : false;
+        return `<div class="part-card bg-card border border-border rounded-xl overflow-hidden fade-up" style="animation-delay:${pi * 80}ms">
+            <div class="flex items-center justify-between px-4 py-3 bg-surface/50 border-b border-border cursor-pointer" onclick="togglePart(${pi})">
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-saffron transition-transform part-chevron-${pi}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                    <span class="text-sm font-bold text-gray-200">${part.name}</span>
+                    <span class="text-[10px] text-gray-600">${part.segments.length} segments</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    ${hasBgm ? '<span class="text-[10px] text-tri font-medium">🎵 BGM set</span>' : ''}
+                    <label class="flex items-center gap-1 cursor-pointer" onclick="event.stopPropagation()">
+                        <span class="text-[10px] text-gray-500">🎵 BGM</span>
+                        <input type="file" accept=".wav" class="hidden" onchange="uploadBgm(${pi},this)"/>
+                        <button onclick="event.stopPropagation(); this.previousElementSibling.click()" class="text-[10px] px-2 py-1 rounded bg-white/5 text-gray-400 hover:bg-white/10 hover:text-saffron transition-colors">Add</button>
+                    </label>
+                </div>
+            </div>
+            <div class="part-body-${pi} p-3 space-y-0">${segsHtml}</div>
+        </div>`;
+    }).join('');
+}
+
+function togglePart(pi) {
+    const body = document.querySelector('.part-body-' + pi);
+    const chevron = document.querySelector('.part-chevron-' + pi);
+    if (body) { body.classList.toggle('hidden'); }
+    if (chevron) { chevron.classList.toggle('rotate-180'); }
+}
+
+function updateSegVoice(pi, si, voice) {
+    if (parsedScript && parsedScript.parts[pi] && parsedScript.parts[pi].segments[si]) {
+        parsedScript.parts[pi].segments[si].voice = voice;
+    }
+}
+
+// ── BGM Upload per part ──
+async function uploadBgm(partIndex, input) {
+    if (!input.files.length) return;
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    try {
+        const res = await fetch('/upload-music', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        bgmMap[partIndex] = data.path;
+        renderTimeline();
+    } catch (e) { alert('BGM upload error: ' + e.message); }
+}
+
+// ── Generate Audiobook ──
+async function generateAudiobook() {
+    if (!parsedScript) { alert('Please upload a script first.'); return; }
+    const btn = document.getElementById('btn-gen-audiobook');
+    btn.disabled = true; btn.classList.add('opacity-50');
+    document.getElementById('gen-ab-text').textContent = 'Generating…';
+
+    // Show loading
+    ['view-home', 'view-timeline', 'view-library'].forEach(v => { document.getElementById(v).classList.add('hidden'); document.getElementById(v).classList.remove('flex'); });
+    show('view-create', 'flex');
+    document.getElementById('create-idle').classList.add('hidden');
+    document.getElementById('create-loading').classList.remove('hidden');
+
+    const enableSfx = document.getElementById('sfx-toggle').checked;
+    try {
+        const res = await fetch('/generate', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parts: parsedScript.parts, bgm_map: bgmMap, enable_sfx: enableSfx, mode: 'audiobook' })
+        });
+        const data = await res.json();
+        if (data.error) { alert('Error: ' + data.error); }
+        else { loadTrack(data.filename, data.url, data.duration_s, data.voice); switchTab('library'); }
+    } catch (e) { alert('Error: ' + e.message); }
+    finally {
+        btn.disabled = false; btn.classList.remove('opacity-50');
+        document.getElementById('gen-ab-text').textContent = 'Generate Audiobook';
+        document.getElementById('create-idle').classList.remove('hidden');
+        document.getElementById('create-loading').classList.add('hidden');
+    }
+}
+
+// ── Generate Standard TTS ──
+async function generateTTS() {
+    const text = document.getElementById('input-text').value.trim();
+    if (!text) { alert('Please enter text.'); return; }
+    const voice = document.getElementById('input-voice').value;
+    const btn = document.getElementById('btn-gen-tts');
+    btn.disabled = true; btn.classList.add('opacity-50');
+    document.getElementById('gen-tts-text').textContent = 'Generating…';
+
+    switchTab('create');
+    document.getElementById('create-idle').classList.add('hidden');
+    document.getElementById('create-loading').classList.remove('hidden');
+
+    try {
+        const res = await fetch('/generate', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, voice_preset: voice, mode: 'standard' })
+        });
+        const data = await res.json();
+        if (data.error) { alert('Error: ' + data.error); }
+        else { loadTrack(data.filename, data.url, data.duration_s, data.voice); switchTab('library'); }
+    } catch (e) { alert('Error: ' + e.message); }
+    finally {
+        btn.disabled = false; btn.classList.remove('opacity-50');
+        document.getElementById('gen-tts-text').textContent = 'Generate Audio';
+        document.getElementById('create-idle').classList.remove('hidden');
+        document.getElementById('create-loading').classList.add('hidden');
+    }
+}
+
+// ── Library ──
+async function loadLibrary() {
+    try { const res = await fetch('/library'); libraryData = await res.json(); renderLibrary(); } catch (e) { console.error(e); }
+}
+
+function renderLibrary() {
+    const grid = document.getElementById('library-grid');
+    const empty = document.getElementById('library-empty');
+    const search = document.getElementById('search-input').value.toLowerCase();
+    let filtered = libraryData;
+    if (activeFilter !== 'all') filtered = filtered.filter(f => f.filename.includes(activeFilter));
+    if (search) filtered = filtered.filter(f => f.filename.toLowerCase().includes(search));
+
+    if (!filtered.length) { grid.innerHTML = ''; empty.classList.remove('hidden'); empty.classList.add('flex'); return; }
+    empty.classList.add('hidden'); empty.classList.remove('flex');
+
+    grid.innerHTML = filtered.map((file, i) => {
+        const name = file.filename.replace('svaanvox_', '').replace('.wav', '').replace(/_/g, ' ');
+        const date = new Date(file.created).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const isAB = file.filename.includes('audiobook');
+        return `<div class="audio-card bg-card border border-border border-l-4 ${isAB ? 'border-l-saffron' : 'border-l-tri'} rounded-xl p-4 cursor-pointer fade-up group" style="animation-delay:${i * 50}ms" onclick="loadTrack('${file.filename}','${file.url}')">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-10 h-10 rounded-lg bg-gradient-to-br ${isAB ? 'from-saffron/20 to-amber-500/10' : 'from-tri/20 to-emerald-500/10'} flex items-center justify-center">
+                    <svg class="w-5 h-5 ${isAB ? 'text-saffron' : 'text-tri'}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+                </div>
+                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onclick="event.stopPropagation();downloadFile('${file.url}','${file.filename}')" class="p-1.5 rounded-lg hover:bg-white/10 text-gray-500 hover:text-saffron transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></button>
+                    <button onclick="event.stopPropagation();deleteFile('${file.filename}')" class="p-1.5 rounded-lg hover:bg-white/10 text-gray-500 hover:text-crimson transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+                </div>
+            </div>
+            <p class="text-sm font-semibold text-gray-200 truncate capitalize">${name}</p>
+            <div class="flex items-center gap-2 mt-2">
+                <span class="text-[10px] font-medium px-2 py-0.5 rounded-full ${isAB ? 'bg-saffron/10 text-saffron' : 'bg-tri/10 text-tri'}">${isAB ? '🎧 Audiobook' : '🎙️ Standard'}</span>
+                <span class="text-[10px] text-gray-600">${file.size_kb} KB</span>
+            </div>
+            <p class="text-[11px] text-gray-600 mt-2">${date}</p>
+        </div>`;
+    }).join('');
+}
+
+function filterLibrary() { renderLibrary(); }
+function filterByMode(mode) {
+    activeFilter = mode;
+    document.querySelectorAll('.filter-btn').forEach(b => { b.classList.remove('active-filter', 'text-gray-300'); b.classList.add('text-gray-500'); });
+    const btn = document.querySelector(`.filter-btn[data-filter="${mode}"]`);
+    if (btn) { btn.classList.add('active-filter', 'text-gray-300'); btn.classList.remove('text-gray-500'); }
+    renderLibrary();
+}
+async function deleteFile(fn) { if (!confirm('Delete?')) return; await fetch('/library/' + fn, { method: 'DELETE' }); loadLibrary(); }
+function downloadFile(url, fn) { const a = document.createElement('a'); a.href = url; a.download = fn; a.click(); }
+
+// ── Player ──
+let isPlaying = false;
+function loadTrack(fn, url, dur, voice) {
+    audio.src = url; audio.load();
+    document.getElementById('player-title').textContent = fn.replace('svaanvox_', '').replace('.wav', '').replace(/_/g, ' ');
+    document.getElementById('player-subtitle').textContent = voice || 'SvaanVox';
+    isPlaying = false; updatePlayIcon();
+    audio.play().then(() => { isPlaying = true; updatePlayIcon() }).catch(() => { });
+}
+function togglePlay() { if (!audio.src) return; if (isPlaying) audio.pause(); else audio.play(); isPlaying = !isPlaying; updatePlayIcon(); }
+function updatePlayIcon() { document.getElementById('icon-play').classList.toggle('hidden', isPlaying); document.getElementById('icon-pause').classList.toggle('hidden', !isPlaying); }
+function skipForward() { audio.currentTime = Math.min(audio.duration, audio.currentTime + 10); }
+function skipBackward() { audio.currentTime = Math.max(0, audio.currentTime - 10); }
+function scrubAudio() { if (!audio.duration) return; audio.currentTime = (document.getElementById('scrubber').value / 100) * audio.duration; }
+function setVolume() { audio.volume = document.getElementById('volume').value; const m = audio.volume === 0; document.getElementById('icon-vol').classList.toggle('hidden', m); document.getElementById('icon-mute').classList.toggle('hidden', !m); }
+function toggleMute() { const v = document.getElementById('volume'); if (audio.volume > 0) { audio._pv = audio.volume; audio.volume = 0; v.value = 0 } else { audio.volume = audio._pv || .8; v.value = audio.volume } const m = audio.volume === 0; document.getElementById('icon-vol').classList.toggle('hidden', m); document.getElementById('icon-mute').classList.toggle('hidden', !m); }
+function formatTime(s) { if (isNaN(s)) return '0:00'; const m = Math.floor(s / 60), sec = Math.floor(s % 60); return m + ':' + (sec < 10 ? '0' : '') + sec; }
+audio.addEventListener('timeupdate', () => { document.getElementById('time-current').textContent = formatTime(audio.currentTime); document.getElementById('time-total').textContent = formatTime(audio.duration); if (audio.duration) document.getElementById('scrubber').value = (audio.currentTime / audio.duration) * 100; });
+audio.addEventListener('ended', () => { isPlaying = false; updatePlayIcon() });
+
+// ── Init ──
+switchTab('home');
+
+</script>
+</body>
+
+</html>
